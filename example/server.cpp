@@ -21,11 +21,13 @@
 #include <map>
 #include <vector>
 #include <list>
-
 #include <iostream>
 #include <sstream>
 #include <thread>
 #include <map>
+#include <chrono>
+#include <iomanip>
+#include <ctime>
 
 #include <unistd.h>
 
@@ -147,6 +149,20 @@ void closeClient(int clientSocket, fd_set *openSockets, int *maxfds)
 
 }
 
+std::string getTimestamp() {
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_time = std::chrono::system_clock::to_time_t(now);
+
+    std::stringstream ss;
+    ss << std::put_time(std::localtime(&now_time), "%Y-%m-%d %H:%M:%S");
+    return ss.str();
+}
+
+void logCommand(int clientSocket, const std::string& command) {
+    std::string timestamp = getTimestamp();
+    std::cout << "[" << timestamp << "] Client " << clientSocket << ": " << command << std::endl;
+}
+
 // Process command from client on the server
 
 void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds, 
@@ -160,6 +176,10 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
 
   while(stream >> token)
       tokens.push_back(token);
+
+  // Log command
+  logCommand(clientSocket, buffer);
+
 
   if((tokens[0].compare("CONNECT") == 0) && (tokens.size() == 2))
   {
