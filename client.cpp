@@ -19,6 +19,7 @@
 #include <string.h>
 #include <algorithm>
 #include <map>
+#include <cstring>
 #include <vector>
 #include <thread>
 #include <iostream>

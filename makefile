@@ -1,10 +1,14 @@
+# Compiler
+CXX = g++
+CXXFLAGS = -Wall 
+
 all: server client
 
-server: server.c
-    gcc -o tsamgroup43 server.c
+server: server.cpp
+    $(CXX) -o tsamgroup43 server.cpp
 
-client: client.c
-    gcc -o client client.c
+client: client.cpp
+    $(CXX) -o client client.cpp
 
 clean:
-    rm -f tsamgrou43 client
+    rm -f tsamgroup43 client
