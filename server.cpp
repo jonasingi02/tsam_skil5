@@ -42,16 +42,28 @@
 // Simple class for handling connections from clients.
 //
 // Client(int socket) - socket to send/receive traffic from client.
-class Client
-{
-  public:
-    int sock;              // socket of client connection
-    std::string name;           // Limit length of name of client's user
+class Client {
+public:
+    int sock;                        // socket of client connection
+    std::string name;                // Client's user name
+    struct sockaddr_in addr;         // Client's address information
 
-    Client(int socket) : sock(socket){} 
+    Client(int socket, struct sockaddr_in address) : sock(socket), addr(address) {}
 
-    ~Client(){}            // Virtual destructor defined for base class
+    ~Client() {}                     // Destructor for cleanup
 };
+
+struct sockaddr_in clientAddress;
+
+struct Message {
+    std::string fromGroupID;
+    std::string content;
+
+    Message(const std::string& from, const std::string& msg) 
+        : fromGroupID(from), content(msg) {}
+};
+
+std::map<std::string, std::queue<Message>> messageQueue;
 
 // Note: map is not necessarily the most efficient method to use here,
 // especially for a server with large numbers of simulataneous connections,
@@ -149,6 +161,37 @@ void closeClient(int clientSocket, fd_set *openSockets, int *maxfds)
 
 }
 
+// Store a message in the message queue for a group
+void storeMessage(const std::string& toGroupID, const std::string& fromGroupID, const std::string& content) {
+    Message newMessage(fromGroupID, content);
+    messageQueue[toGroupID].push(newMessage);
+    std::cout << "Stored message for group " << toGroupID << ": " << content << std::endl;
+}
+
+// Get all messages for a group from the message queue
+std::vector<Message> getMessages(const std::string& groupID) {
+    std::vector<Message> messages;
+
+    // Check if the group has any messages in the queue and add them to the messages vector
+    if(messageQueue.find(groupID) != messageQueue.end()) {
+        while(!messageQueue[groupID].empty()) {
+            messages.push_back(messageQueue[groupID].front());
+            messageQueue[groupID].pop();
+        }
+    }
+    return messages;
+}
+
+// Get the number of messages in the message queue for a group
+int getMessageCount(const std::string& groupID) {
+    if(messageQueue.find(groupID) != messageQueue.end()) {
+        return messageQueue[groupID].size();
+    }
+    return 0;
+}
+
+
+
 std::string getTimestamp() {
     auto now = std::chrono::system_clock::now();
     std::time_t now_time = std::chrono::system_clock::to_time_t(now);
@@ -193,57 +236,103 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
  
       closeClient(clientSocket, openSockets, maxfds);
   }
-  else if(tokens[0].compare("WHO") == 0)
+
+  else if(tokens[0].compare("HELO") == 0 && tokens.size() == 2)
+{
+    // Check if the client exists
+    auto it = clients.find(clientSocket);
+    if (it != clients.end()) {
+        // Client found, get the client info
+        Client* client = it->second;
+
+        std::string response = "SERVERS,";
+        response += "A5 " + std::to_string(client->sock) + "," + 
+                    inet_ntoa(client->addr.sin_addr) + "," + 
+                    std::to_string(ntohs(client->addr.sin_port)); // Port needs to be converted
+
+        // Append additional 1-hop server connections
+        for (auto const& pair : clients)
+        {
+            if (pair.second->sock != client->sock)
+            {
+                response += ";" + std::to_string(pair.second->sock) + "," + 
+                            inet_ntoa(pair.second->addr.sin_addr) + "," + 
+                            std::to_string(ntohs(pair.second->addr.sin_port)); // Convert port
+            }
+        }
+
+        send(clientSocket, response.c_str(), response.length(), 0);
+    } else {
+        std::cerr << "Client not found for HELO response." << std::endl;
+    }
+}
+    
+  else if(tokens[0].compare("SENDMSG") == 0 && tokens.size() >= 4)
+{
+    std::string toGroupID = tokens[1];
+    std::string fromGroupID = tokens[2];
+    
+    // Construct the message from the tokens starting from index 3
+    std::string message;
+    for(auto i = tokens.begin() + 3; i != tokens.end(); i++) 
+    {
+        message += *i + " ";
+    }
+
+    // Remove the trailing space if message is not empty
+    if (!message.empty()) {
+        message.pop_back();
+    }
+
+    // Construct the full SENDMSG command
+    std::string sendMsgCommand = "SENDMSG," + toGroupID + "," + fromGroupID + "," + message;
+
+    // Check if the command exceeds the 500-byte limit
+    if (sendMsgCommand.length() > 5000)
+    {
+        std::cerr << "SENDMSG command exceeds the 500-byte limit." << std::endl;
+
+        // Optionally send an error message back to the client
+        std::string errorMsg = "Error: Message exceeds the 500-byte limit.";
+        send(clientSocket, errorMsg.c_str(), errorMsg.length(), 0);
+        return; // Exit early to avoid sending the message
+    }
+
+    // Store the message for the target group if within limits
+    storeMessage(toGroupID, fromGroupID, message);
+}
+
+  else if(tokens[0].compare("GETMSGS") == 0 && tokens.size() == 2)
   {
-     std::cout << "Who is logged on" << std::endl;
-     std::string msg;
+    std::string groupID = tokens[1];
+    std::vector<Message> messages = getMessages(groupID);
 
-     for(auto const& names : clients)
-     {
-        msg += names.second->name + ",";
-
-     }
-     // Reducing the msg length by 1 loses the excess "," - which
-     // granted is totally cheating.
-     send(clientSocket, msg.c_str(), msg.length()-1, 0);
-
+    // Send the messages back to the client
+    for(const auto& msg : messages)
+    {
+        std::string response = "From " + msg.fromGroupID + ": " + msg.content;
+        send(clientSocket, response.c_str(), response.length(), 0);
+    }
   }
-  // This is slightly fragile, since it's relying on the order
-  // of evaluation of the if statement.
-  else if((tokens[0].compare("MSG") == 0) && (tokens[1].compare("ALL") == 0))
+
+  else if(tokens[0].compare("KEEPALIVE") == 0 && tokens.size() == 2)
   {
-      std::string msg;
-      for(auto i = tokens.begin()+2;i != tokens.end();i++) 
-      {
-          msg += *i + " ";
-      }
+    std::string toGroupID = tokens[1];
+    int pendingCount = getMessageCount(toGroupID);
 
-      for(auto const& pair : clients)
-      {
-          send(pair.second->sock, msg.c_str(), msg.length(),0);
-      }
+    std::string response = "KEEPALIVE," + std::to_string(pendingCount);
+    send(clientSocket, response.c_str(), response.length(), 0);
   }
-  else if(tokens[0].compare("MSG") == 0)
-  {
-      for(auto const& pair : clients)
-      {
-          if(pair.second->name.compare(tokens[1]) == 0)
-          {
-              std::string msg;
-              for(auto i = tokens.begin()+2;i != tokens.end();i++) 
-              {
-                  msg += *i + " ";
-              }
-              send(pair.second->sock, msg.c_str(), msg.length(),0);
-          }
-      }
-  }
+
   else
   {
       std::cout << "Unknown command from client:" << buffer << std::endl;
   }
      
 }
+
+// Assume you have filled clientAddress with the appropriate information
+
 
 int main(int argc, char* argv[])
 {
@@ -303,6 +392,7 @@ int main(int argc, char* argv[])
             // First, accept  any new connections to the server on the listening socket
             if(FD_ISSET(listenSock, &readSockets))
             {
+
                clientSock = accept(listenSock, (struct sockaddr *)&client,
                                    &clientLen);
                printf("accept***\n");
@@ -313,7 +403,8 @@ int main(int argc, char* argv[])
                maxfds = std::max(maxfds, clientSock) ;
 
                // create a new client to store information.
-               clients[clientSock] = new Client(clientSock);
+
+               clients[clientSock] = new Client(clientSock, client);
 
                // Decrement the number of sockets waiting to be dealt with
                n--;
