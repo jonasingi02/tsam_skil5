@@ -38,6 +38,10 @@
 
 #define BACKLOG  5          // Allowed length of queue of waiting connections
 
+const char SOH = '\x01'; // Start of Header character
+const char EOT = '\x04'; // End of Transmission character
+
+
 // Simple class for handling connections from clients.
 // Client(int socket) - socket to send/receive traffic from client.
 class Client {
@@ -206,19 +210,51 @@ void logCommand(int clientSocket, const std::string& command) {
     std::cout << "[" << timestamp << "] Client " << clientSocket << ": " << command << std::endl;
 }
 
+// Join a vector of strings into a single string
+std::string join(const std::vector<std::string>& vec, const std::string& delimiter) {
+    std::ostringstream oss;
+    for (size_t i = 0; i < vec.size(); ++i) {
+        oss << vec[i];
+        if (i != vec.size() - 1) {
+            oss << delimiter;
+        }
+    }
+    return oss.str();
+}
+
+// Construct a command with a command name and parameters also with SOH and EOT characters
+std::string constructCommand(const std::string& command, const std::vector<std::string>& params) {
+    std::string cmd = std::string(1, SOH) + command;
+
+    if (!params.empty()) {
+        cmd += "," + join(params, ","); 
+    }
+
+    cmd += EOT; // Append the End of Transmission character
+    return cmd;
+}
+
+
 
 // Process command from client on the server
 void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds, 
                   char *buffer) 
 {
+  if (buffer[0] != SOH || buffer[strlen(buffer) - 1] != EOT) {
+      std::cerr << "Invalid command format: missing SOH or EOT." << std::endl;
+      return; // Exit if the format is incorrect
+  }  
+
+  // Create a string from the buffer and remove SOH and EOT
+  std::string command(buffer + 1, strlen(buffer) - 2); // Exclude SOH and EOT
   std::vector<std::string> tokens;
-  std::string token;
+  std::string token;  
 
-  // Split command from client into tokens for parsing
-  std::stringstream stream(buffer);
-
-  while(stream >> token)
-      tokens.push_back(token);
+  // Split command into tokens for parsing
+  std::stringstream stream(command);
+  while (std::getline(stream, token, ',')) {
+      tokens.push_back(token); // Split by comma
+  }
 
   // Log command
   logCommand(clientSocket, buffer);
