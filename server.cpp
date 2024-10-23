@@ -28,7 +28,6 @@
 #include <chrono>
 #include <iomanip>
 #include <ctime>
-
 #include <unistd.h>
 
 // fix SOCK_NONBLOCK for OSX
@@ -40,7 +39,6 @@
 #define BACKLOG  5          // Allowed length of queue of waiting connections
 
 // Simple class for handling connections from clients.
-//
 // Client(int socket) - socket to send/receive traffic from client.
 class Client {
 public:
@@ -55,6 +53,7 @@ public:
 
 struct sockaddr_in clientAddress;
 
+// Message struct to store messages for groups
 struct Message {
     std::string fromGroupID;
     std::string content;
@@ -63,7 +62,10 @@ struct Message {
         : fromGroupID(from), content(msg) {}
 };
 
+// Map to store messages for each group
 std::map<std::string, std::queue<Message>> messageQueue;
+
+
 
 // Note: map is not necessarily the most efficient method to use here,
 // especially for a server with large numbers of simulataneous connections,
@@ -135,7 +137,6 @@ int open_socket(int portno)
 
 // Close a client's connection, remove it from the client list, and
 // tidy up select sockets afterwards.
-
 void closeClient(int clientSocket, fd_set *openSockets, int *maxfds)
 {
 
@@ -190,8 +191,7 @@ int getMessageCount(const std::string& groupID) {
     return 0;
 }
 
-
-
+// Get the current timestamp in the format "YYYY-MM-DD HH:MM:SS"
 std::string getTimestamp() {
     auto now = std::chrono::system_clock::now();
     std::time_t now_time = std::chrono::system_clock::to_time_t(now);
@@ -200,14 +200,14 @@ std::string getTimestamp() {
     ss << std::put_time(std::localtime(&now_time), "%Y-%m-%d %H:%M:%S");
     return ss.str();
 }
-
+// Log the command received from a client
 void logCommand(int clientSocket, const std::string& command) {
     std::string timestamp = getTimestamp();
     std::cout << "[" << timestamp << "] Client " << clientSocket << ": " << command << std::endl;
 }
 
-// Process command from client on the server
 
+// Process command from client on the server
 void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds, 
                   char *buffer) 
 {
@@ -223,12 +223,8 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
   // Log command
   logCommand(clientSocket, buffer);
 
-
-  if((tokens[0].compare("CONNECT") == 0) && (tokens.size() == 2))
-  {
-     clients[clientSocket]->name = tokens[1];
-  }
-  else if(tokens[0].compare("LEAVE") == 0)
+  // Close the socket
+  if (tokens[0].compare("LEAVE") == 0)
   {
       // Close the socket, and leave the socket handling
       // code to deal with tidying up clients etc. when
@@ -236,9 +232,9 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
  
       closeClient(clientSocket, openSockets, maxfds);
   }
-
+  // First message sent by server
   else if(tokens[0].compare("HELO") == 0 && tokens.size() == 2)
-{
+  {
     // Check if the client exists
     auto it = clients.find(clientSocket);
     if (it != clients.end()) {
@@ -265,10 +261,33 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
     } else {
         std::cerr << "Client not found for HELO response." << std::endl;
     }
-}
-    
+  }
+
+  // List all connected servers
+  else if(tokens[0].compare("LISTSERVERS") == 0)
+  {
+    std::string response = "SERVERS,";
+    bool first = true; // To handle the first entry differently
+
+    // Append all server connections 
+    for (auto const& pair : clients)
+    {
+        if (!first)
+        {
+            response += ";"; 
+        }
+        first = false;
+
+        response += "A5 " + std::to_string(pair.second->sock) + "," + 
+                    inet_ntoa(pair.second->addr.sin_addr) + "," + 
+                    std::to_string(ntohs(pair.second->addr.sin_port)); // Convert port
+    }
+
+    send(clientSocket, response.c_str(), response.length(), 0);
+  }
+  // Send a message to a group
   else if(tokens[0].compare("SENDMSG") == 0 && tokens.size() >= 4)
-{
+  {
     std::string toGroupID = tokens[1];
     std::string fromGroupID = tokens[2];
     
@@ -287,20 +306,20 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
     // Construct the full SENDMSG command
     std::string sendMsgCommand = "SENDMSG," + toGroupID + "," + fromGroupID + "," + message;
 
-    // Check if the command exceeds the 500-byte limit
+    // Check if the command exceeds the 5000-byte limit
     if (sendMsgCommand.length() > 5000)
     {
-        std::cerr << "SENDMSG command exceeds the 500-byte limit." << std::endl;
+        std::cerr << "SENDMSG command exceeds the 5000-byte limit." << std::endl;
 
-        // Optionally send an error message back to the client
-        std::string errorMsg = "Error: Message exceeds the 500-byte limit.";
+        // Send an error message back to the client
+        std::string errorMsg = "Error: Message exceeds the 5000-byte limit.";
         send(clientSocket, errorMsg.c_str(), errorMsg.length(), 0);
-        return; // Exit early to avoid sending the message
+        return; // Exit to avoid sending the message 
     }
 
     // Store the message for the target group if within limits
     storeMessage(toGroupID, fromGroupID, message);
-}
+  }
 
   else if(tokens[0].compare("GETMSGS") == 0 && tokens.size() == 2)
   {
