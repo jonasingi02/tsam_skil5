@@ -86,7 +86,39 @@ void get_message_from_server(int sock, const std::string& group_id) {
     }
 }
 
-void send_messege_to_group()
+void send_message_to_server(int sock, const std::string& group_id, const std::string& message_contents) {
+    std::string command = "\x01SENDMSG," + group_id + "," + message_contents + "\x04";
+    send(sock, command.c_str(), command.size(), 0);
+
+    printTimestamp();
+    std::cout << "Sent: " << "SENDMSG," << group_id << ", " << message_contents << std::endl;
+
+    // Acknowledge from the server
+    char buffer[5000];
+    int valread = read(sock, buffer, 5000);
+    if (valread > 0) {
+        buffer[valread] = '\0';
+        printTimestamp();
+        std::cout << "Received: " << buffer << std::endl;
+    }
+}
+
+// Function to list servers connected to the main server
+void list_servers(int sock) {
+    std::string command = "\x01LISTSERVERS\x04";
+    send(sock, command.c_str(), command.size(), 0);
+
+    printTimestamp();
+    std::cout << "Sent: LISTSERVERS" << std::endl;
+
+    char buffer[5000];
+    int valread = read(sock, buffer, 5000);
+    if (valread > 0) {
+        buffer[valread] = '\0';
+        printTimestamp();
+        std::cout << "Received: " << buffer << std::endl;
+    }
+}
 
 int main(int argc, char* argv[])
 {
@@ -166,43 +198,42 @@ int main(int argc, char* argv[])
    std::thread serverThread(listenServer, serverSocket);
 
    finished = false;
-   while(!finished)
-   {
-       bzero(buffer, sizeof(buffer));
+   while (!finished) {
+    bzero(buffer, sizeof(buffer));
+    fgets(buffer, sizeof(buffer), stdin);
+    buffer[strcspn(buffer, "\n")] = 0; // Remove newline character
 
-       fgets(buffer, sizeof(buffer), stdin);
-       buffer[strcspn(buffer, "\n")] = 0; // Remove newline character
+    if (strncmp(buffer, "/quit", 5) == 0) {
+        finished = true;
+        printf("Exiting chat...\n");
+        close(serverSocket);
+        break;
+    }
 
-       if (strncmp(buffer, "/quit", 5) == 0)
-        {
+    std::regex getmsgRegex("^GETMSG,(\\d+)$");
+    std::regex sendmsgRegex("^SENDMSG,(\\d+),(.+)$");
+    std::regex listserversRegex("^LISTSERVERS$");
+    std::cmatch match;
+
+    if (std::regex_match(buffer, match, getmsgRegex)) {
+        std::string group_id = match[1].str();
+        get_message_from_server(serverSocket, group_id);
+
+    } else if (std::regex_match(buffer, match, sendmsgRegex)) {
+        std::string group_id = match[1].str();
+        std::string message_contents = match[2].str();
+        send_message_to_server(serverSocket, group_id, message_contents);
+
+    } else if (std::regex_match(buffer, match, listserversRegex)) {
+        list_servers(serverSocket);
+
+    } else {
+        std::string formattedMessage = std::string(1, SOH) + buffer + std::string(1, EOT);
+        nwrite = send(serverSocket, formattedMessage.c_str(), formattedMessage.length(), 0);
+
+        if (nwrite == -1) {
+            perror("send() to server failed: ");
             finished = true;
-            printf("Exiting chat...\n");
-            close(serverSocket);  
-            break;
         }
-       
-       // WRAP WITH SOH AND EOT AND SEND
-       std::string formattedMessage = std::string(1, SOH) + buffer + std::string(1, EOT);
-       
-       std::regex getmsgRegex("^GETMSG,\\d+$");
-       std::cmatch match;
-
-       if (std::regex_match(buffer, match, getmsgRegex))
-        {
-            std::string group_id = match[1].str();
-
-            get_message_from_server(serverSocket, group_id);
-        }
-       nwrite = send(serverSocket, formattedMessage.c_str(), formattedMessage.length(), 0);
-
-       if(nwrite  == -1)
-       {
-           perror("send() to server failed: ");
-           finished = true;
-       }
-
-   }
-
-   serverThread.join();
-   return 0;
+    }
 }
