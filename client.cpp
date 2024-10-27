@@ -29,6 +29,9 @@
 
 // Threaded function for handling responss from server
 
+const char SOH = '\x01'; // Start of Header character
+const char EOT = '\x04'; // End of Transmission character
+
 void listenServer(int serverSocket)
 {
     int nread;                                  // Bytes read from socket
@@ -135,6 +138,7 @@ int main(int argc, char* argv[])
        bzero(buffer, sizeof(buffer));
 
        fgets(buffer, sizeof(buffer), stdin);
+       buffer[strcspn(buffer, "\n")] = 0; // Remove newline character
 
        if (strncmp(buffer, "/quit", 5) == 0)
         {
@@ -143,8 +147,10 @@ int main(int argc, char* argv[])
             close(serverSocket);  
             break;
         }
-
-       nwrite = send(serverSocket, buffer, strlen(buffer),0);
+       
+       // WRAP WITH SOH AND EOT AND SEND
+       std::string formattedMessage = std::string(1, SOH) + buffer + std::string(1, EOT);
+       nwrite = send(serverSocket, formattedMessage.c_str(), formattedMessage.length(), 0);
 
        if(nwrite  == -1)
        {

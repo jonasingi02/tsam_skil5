@@ -256,11 +256,13 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
       tokens.push_back(token); // Split by comma
   }
 
+  std::cout << "Debug: Received raw buffer content: " << buffer << std::endl;
+
   // Log command
   logCommand(clientSocket, buffer);
 
   // Close the socket
-  if (tokens[0].compare("LEAVE") == 0)
+  if (command.compare("LEAVE") == 0)
   {
       // Close the socket, and leave the socket handling
       // code to deal with tidying up clients etc. when
@@ -269,7 +271,7 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
       closeClient(clientSocket, openSockets, maxfds);
   }
   // First message sent by server
-  else if(tokens[0].compare("HELO") == 0 && tokens.size() == 2)
+  else if(command.compare("HELO") == 0 && tokens.size() == 2)
   {
     // Check if the client exists
     auto it = clients.find(clientSocket);
@@ -300,7 +302,7 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
   }
 
   // List all connected servers
-  else if(tokens[0].compare("LISTSERVERS") == 0)
+  else if(command.compare("LISTSERVERS") == 0)
   {
     std::string response = "SERVERS,";
     bool first = true; // To handle the first entry differently
@@ -322,7 +324,7 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
     send(clientSocket, response.c_str(), response.length(), 0);
   }
   // Send a message to a group
-  else if(tokens[0].compare("SENDMSG") == 0 && tokens.size() >= 4)
+  else if(command.compare("SENDMSG") == 0 && tokens.size() >= 4)
   {
     std::string toGroupID = tokens[1];
     std::string fromGroupID = tokens[2];
@@ -357,7 +359,7 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
     storeMessage(toGroupID, fromGroupID, message);
   }
 
-  else if(tokens[0].compare("GETMSGS") == 0 && tokens.size() == 2)
+  else if(command.compare("GETMSGS") == 0 && tokens.size() == 2)
   {
     std::string groupID = tokens[1];
     std::vector<Message> messages = getMessages(groupID);
@@ -370,7 +372,7 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
     }
   }
 
-  else if(tokens[0].compare("KEEPALIVE") == 0 && tokens.size() == 2)
+  else if(command.compare("KEEPALIVE") == 0 && tokens.size() == 2)
   {
     std::string toGroupID = tokens[1];
     int pendingCount = getMessageCount(toGroupID);
@@ -386,7 +388,7 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
      
 }
 
-// Assume you have filled clientAddress with the appropriate information
+
 
 
 int main(int argc, char* argv[])
@@ -447,7 +449,7 @@ int main(int argc, char* argv[])
             // First, accept  any new connections to the server on the listening socket
             if(FD_ISSET(listenSock, &readSockets))
             {
-
+               clientLen = sizeof(client);  
                clientSock = accept(listenSock, (struct sockaddr *)&client,
                                    &clientLen);
                printf("accept***\n");
