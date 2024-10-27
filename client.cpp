@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <ctime>
+#include <iomanip>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/ip.h>
@@ -23,6 +25,7 @@
 #include <vector>
 #include <thread>
 #include <iostream>
+#include <regex>
 #include <sstream>
 #include <thread>
 #include <map>
@@ -51,6 +54,36 @@ void listenServer(int serverSocket)
        }
     }
 }
+
+void printTimestamp() {
+    // Get current time
+    auto now = std::chrono::system_clock::now();
+    std::time_t now_time = std::chrono::system_clock::to_time_t(now);
+
+    // Print time in a readable format
+    std::cout << "[" << std::put_time(std::localtime(&now_time), "%Y-%m-%d %H:%M:%S") << "] ";
+}
+
+void get_message_from_server(int sock, const std::string& group_id) {
+    // Send the GETMSG command to the server
+    std::string command = "\x01GETMSG," + group_id + "\x04";
+    send(sock, command.c_str(), command.size(), 0);
+
+    // Log sent command
+    printTimestamp();
+    std::cout << "Sent: " << "GETMSG," << group_id << std::endl;
+
+    // Receive server's response
+    char buffer[5000];
+    int valread = read(sock, buffer, 5000);
+    if (valread > 0) {
+        buffer[valread] = '\0';
+        printTimestamp();
+        std::cout << "Received: " << buffer << std::endl;
+    }
+}
+
+void send_messege_to_group()
 
 int main(int argc, char* argv[])
 {
@@ -144,6 +177,15 @@ int main(int argc, char* argv[])
             break;
         }
 
+       std::regex getmsgRegex("^GETMSG,\\d+$");
+       std::cmatch match;
+
+       if (std::regex_match(buffer, match, getmsgRegex))
+        {
+            std::string group_id = match[1].str();
+
+            get_message_from_server(serverSocket, group_id);
+        }
        nwrite = send(serverSocket, buffer, strlen(buffer),0);
 
        if(nwrite  == -1)

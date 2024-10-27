@@ -17,11 +17,11 @@
 #include <netdb.h>
 #include <arpa/inet.h>
 #include <string.h>
-//#include <algorithm>
+#include <algorithm>
 #include <map>
 #include <vector>
 #include <thread>
-
+#include <fcntl.h>
 #include <iostream>
 #include <sstream>
 #include <thread>
