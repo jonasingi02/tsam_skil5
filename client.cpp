@@ -210,30 +210,11 @@ int main(int argc, char* argv[])
         break;
     }
 
-    std::regex getmsgRegex("^GETMSG,(\\d+)$");
-    std::regex sendmsgRegex("^SENDMSG,(\\d+),(.+)$");
-    std::regex listserversRegex("^LISTSERVERS$");
-    std::cmatch match;
-
-    if (std::regex_match(buffer, match, getmsgRegex)) {
-        std::string group_id = match[1].str();
-        get_message_from_server(serverSocket, group_id);
-
-    } else if (std::regex_match(buffer, match, sendmsgRegex)) {
-        std::string group_id = match[1].str();
-        std::string message_contents = match[2].str();
-        send_message_to_server(serverSocket, group_id, message_contents);
-
-    } else if (std::regex_match(buffer, match, listserversRegex)) {
-        list_servers(serverSocket);
-
-    } else {
-        std::string formattedMessage = std::string(1, SOH) + buffer + std::string(1, EOT);
-        nwrite = send(serverSocket, formattedMessage.c_str(), formattedMessage.length(), 0);
-
-        if (nwrite == -1) {
-            perror("send() to server failed: ");
-            finished = true;
-        }
+    std::string formattedMessage = std::string(1, SOH) + buffer + std::string(1, EOT);
+    nwrite = send(serverSocket, formattedMessage.c_str(), formattedMessage.length(), 0);
+    if (nwrite == -1) {
+        perror("send() to server failed: ");
+        finished = true;
     }
+   }
 }
