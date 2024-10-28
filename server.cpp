@@ -1,10 +1,3 @@
-//
-// Simple chat server for TSAM-409
-//
-// Command line: ./chat_server 4000 
-//
-// Author: Jacky Mallett (jacky@ru.is)
-//
 #include <stdio.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -139,6 +132,7 @@ int open_socket(int portno)
       return(sock);
    }
 }
+
 
 // Close a client's connection, remove it from the client list, and
 // tidy up select sockets afterwards.
@@ -408,7 +402,7 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
         // Invalid format, send an error response
         std::string errorMsg = "Error: Invalid SENDMSG command format.";
         send(clientSocket, errorMsg.c_str(), errorMsg.length(), 0);
-        return; // Exit
+        return; 
     }
 
     // Construct the full SENDMSG command to check size
@@ -421,7 +415,7 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
         // Send an error message back to the client
         std::string errorMsg = "Error: Message exceeds the 5000-byte limit.";
         send(clientSocket, errorMsg.c_str(), errorMsg.length(), 0);
-        return; // Exit
+        return; 
     }
 
     // Store the message for the target group if within limits
