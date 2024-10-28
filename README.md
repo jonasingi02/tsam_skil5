@@ -102,3 +102,21 @@ The server listens for client connections and manages communication based on the
 ### 5. Other Notes
 
 The server logs all client interactions to a file (`server_log.txt`) in append mode. This log can be used for debugging and auditing communication.
+
+## Wireshark Trace for Client-Server Communication
+
+The following steps were used to capture the communication between the client and server:
+
+1. **Setup**: Wireshark was used to monitor the network interface on which the server was running.
+2. **Capture**: All client commands were executed sequentially to initiate communication with the server.
+3. **Filtering**: The capture was filtered using `tcp.port == 4021` to isolate relevant packets.
+4. **Saving**: The filtered capture was saved as `client_server_trace.pcap`
+
+The captured trace file is included with this submission, demonstrating the following commands:
+- **LISTSERVERS**
+- **SENDMSG**
+- **GETMSG**
+
+### Viewing the Trace
+
+To view the trace, open `client_server_trace.pcap` in Wireshark. Filter by `tcp.port == 4021` to see communication specific to the server.

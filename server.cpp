@@ -273,11 +273,17 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
       std::cerr << "Invalid command format: missing SOH or EOT." << std::endl;
       return; // Exit if the format is incorrect
   }  
+  
+  std::cout << "Received buffer from client: " << buffer << std::endl;
+  
+  
 
   // Create a string from the buffer and remove SOH and EOT
   std::string command(buffer + 1, strlen(buffer) - 2); // Exclude SOH and EOT
   std::vector<std::string> tokens;
   std::string token;  
+
+
 
   // Split command into tokens for parsing
   std::stringstream stream(command);
@@ -285,12 +291,15 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
       tokens.push_back(token); // Split by comma
   }
 
+  std::cout << "Command: " << tokens[0] << std::endl;
+  std::cout << "Token size: " << tokens.size() << std::endl;
+
   // Log command
   logCommand(clientSocket, buffer);
 
 
   // Close the socket
-  if (command.compare("LEAVE") == 0)
+  if (tokens[0].compare("LEAVE") == 0)
   {
       // Close the socket, and leave the socket handling
       // code to deal with tidying up clients etc. when
@@ -301,7 +310,7 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
  
 
   // First message sent by server after it connects
-  else if(command.compare("HELO") == 0 && tokens.size() == 2)
+  else if(tokens[0].compare("HELO") == 0 && tokens.size() == 2)
   {
     // Check if the client exists
     auto it = clients.find(clientSocket);
@@ -342,7 +351,7 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
 
 
   // List all connected servers
-  else if(command.compare("LISTSERVERS") == 0)
+  else if(tokens[0].compare("LISTSERVERS") == 0)
   {
     std::string response = "SERVERS,";
     bool first = true; // To handle the first entry differently
@@ -366,43 +375,60 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
 
 
   // Send a message to a group
-  else if(command.compare("SENDMSG") == 0 && tokens.size() >= 4)
-  {
-    std::string toGroupID = tokens[1];
-    std::string fromGroupID = tokens[2];
-    
-    // Construct the message from the tokens starting from index 3
+  else if(tokens[0].compare("SENDMSG") == 0) 
+{
+    std::string toGroupID;
+    std::string fromGroupID;
     std::string message;
-    for(auto i = tokens.begin() + 3; i != tokens.end(); i++) 
-    {
-        message += *i + " ";
+
+    // Check if it's the 3-token format: "SENDMSG,<GROUP ID>,<message contents>"
+    if (tokens.size() == 3) {
+        toGroupID = tokens[1];
+        fromGroupID = "self";  // Use "self" or some identifier if `FROM GROUP ID` is implied
+
+        // The entire message content is in the third token
+        message = tokens[2];
+    } 
+    // Else, use the 4-token format: "SENDMSG,<TO GROUP ID>,<FROM GROUP ID>,<message content>"
+    else if (tokens.size() >= 4) {
+        toGroupID = tokens[1];
+        fromGroupID = tokens[2];
+
+        // Construct the message content starting from the 4th token
+        for(auto i = tokens.begin() + 3; i != tokens.end(); i++) {
+            message += *i + " ";
+        }
+
+        // Remove trailing space from message
+        if (!message.empty()) {
+            message.pop_back();
+        }
+    }
+    else {
+        // Invalid format, send an error response
+        std::string errorMsg = "Error: Invalid SENDMSG command format.";
+        send(clientSocket, errorMsg.c_str(), errorMsg.length(), 0);
+        return; // Exit
     }
 
-    // Remove the trailing space if message is not empty
-    if (!message.empty()) {
-        message.pop_back();
-    }
-
-    // Construct the full SENDMSG command
+    // Construct the full SENDMSG command to check size
     std::string sendMsgCommand = "SENDMSG," + toGroupID + "," + fromGroupID + "," + message;
 
     // Check if the command exceeds the 5000-byte limit
-    if (sendMsgCommand.length() > 5000)
-    {
+    if (sendMsgCommand.length() > 5000) {
         std::cerr << "SENDMSG command exceeds the 5000-byte limit." << std::endl;
 
         // Send an error message back to the client
         std::string errorMsg = "Error: Message exceeds the 5000-byte limit.";
         send(clientSocket, errorMsg.c_str(), errorMsg.length(), 0);
-        return; // Exit to avoid sending the message 
+        return; // Exit
     }
 
     // Store the message for the target group if within limits
     storeMessage(toGroupID, fromGroupID, message);
-  }
-
+}
   // Get messages for a group
-  else if(command.compare("GETMSGS") == 0 && tokens.size() == 2)
+  else if(tokens[0].compare("GETMSGS") == 0 && tokens.size() == 2)
   {
     std::string groupID = tokens[1];
     std::vector<Message> messages = getMessages(groupID);
@@ -415,8 +441,27 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
     }
   }
 
+  else if (tokens[0].compare("GETMSG") == 0 && tokens.size() == 2)
+  {
+    std::string groupID = tokens[1];
+    
+    // Retrieve a single message, for example, the latest or first in the list
+    std::vector<Message> messages = getMessages(groupID);
+    
+    if (!messages.empty()) {
+        const Message& msg = messages.front();  // Get the first message or define criteria for "latest"
+        std::string response = "From " + msg.fromGroupID + ": " + msg.content;
+        send(clientSocket, response.c_str(), response.length(), 0);
+    } else {
+        // Send a message if no messages are found for the group
+        std::string response = "No messages found for group " + groupID;
+        send(clientSocket, response.c_str(), response.length(), 0);
+    }
+  }
+
+
   // Keep alive command
-  else if(command.compare("KEEPALIVE") == 0 && tokens.size() == 2)
+  else if(tokens[0].compare("KEEPALIVE") == 0 && tokens.size() == 2)
   {
     std::string toGroupID = tokens[1];
     int pendingCount = getMessageCount(toGroupID);
