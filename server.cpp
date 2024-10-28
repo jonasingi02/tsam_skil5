@@ -29,6 +29,7 @@
 #include <iomanip>
 #include <ctime>
 #include <unistd.h>
+#include <fstream>
 
 // fix SOCK_NONBLOCK for OSX
 #ifndef SOCK_NONBLOCK
@@ -49,7 +50,7 @@ public:
     int sock;                        // socket of client connection
     std::string name;                // Client's user name
     struct sockaddr_in addr;         // Client's address information
-
+    int id; 
     Client(int socket, struct sockaddr_in address) : sock(socket), addr(address) {}
 
     ~Client() {}                     // Destructor for cleanup
@@ -204,10 +205,38 @@ std::string getTimestamp() {
     ss << std::put_time(std::localtime(&now_time), "%Y-%m-%d %H:%M:%S");
     return ss.str();
 }
+
+// Get the log file stream for writing log messages
+std::ofstream& getLogFileStream() {
+    static std::ofstream logFile("server_log.txt", std::ios_base::app); // Appends to log file
+    return logFile;
+}
+
 // Log the command received from a client
 void logCommand(int clientSocket, const std::string& command) {
     std::string timestamp = getTimestamp();
-    std::cout << "[" << timestamp << "] Client " << clientSocket << ": " << command << std::endl;
+    
+    // Prepare the log message
+    std::string logMessage = "[" + timestamp + "] Client " + std::to_string(clientSocket) + ": " + command;
+
+    // Output to console
+    std::cout << logMessage << std::endl;
+    
+    // Output to log file
+    std::ofstream& logFile = getLogFileStream();
+    if (logFile.is_open()) {
+        logFile << logMessage << std::endl;
+    } else {
+        std::cerr << "Error: Unable to open log file for writing." << std::endl;
+    }
+}
+
+// Close the log file stream
+void closeLogFile() {
+    std::ofstream& logFile = getLogFileStream();
+    if (logFile.is_open()) {
+        logFile.close();
+    }
 }
 
 // Join a vector of strings into a single string
@@ -256,10 +285,9 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
       tokens.push_back(token); // Split by comma
   }
 
-  std::cout << "Debug: Received raw buffer content: " << buffer << std::endl;
-
   // Log command
   logCommand(clientSocket, buffer);
+
 
   // Close the socket
   if (command.compare("LEAVE") == 0)
@@ -270,7 +298,9 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
  
       closeClient(clientSocket, openSockets, maxfds);
   }
-  // First message sent by server
+ 
+
+  // First message sent by server after it connects
   else if(command.compare("HELO") == 0 && tokens.size() == 2)
   {
     // Check if the client exists
@@ -280,16 +310,25 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
         Client* client = it->second;
 
         std::string response = "SERVERS,";
-        response += "A5 " + std::to_string(client->sock) + "," + 
+        
+        // Add the server sending the command first
+        response += "A5_" + std::to_string(client->id) + "," +  // Include ID of this server with underscore
                     inet_ntoa(client->addr.sin_addr) + "," + 
                     std::to_string(ntohs(client->addr.sin_port)); // Port needs to be converted
 
         // Append additional 1-hop server connections
+        bool first = true; // To handle the first entry differently
         for (auto const& pair : clients)
         {
-            if (pair.second->sock != client->sock)
+            if (pair.second->sock != client->sock) // Don't include the calling client
             {
-                response += ";" + std::to_string(pair.second->sock) + "," + 
+                if (!first)
+                {
+                    response += ";"; 
+                }
+                first = false;
+
+                response += "A5_" + std::to_string(pair.second->id) + "," +  // Use underscore
                             inet_ntoa(pair.second->addr.sin_addr) + "," + 
                             std::to_string(ntohs(pair.second->addr.sin_port)); // Convert port
             }
@@ -300,6 +339,7 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
         std::cerr << "Client not found for HELO response." << std::endl;
     }
   }
+
 
   // List all connected servers
   else if(command.compare("LISTSERVERS") == 0)
@@ -316,13 +356,15 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
         }
         first = false;
 
-        response += "A5 " + std::to_string(pair.second->sock) + "," + 
+        response += "A5_" + std::to_string(pair.second->id) + "," + 
                     inet_ntoa(pair.second->addr.sin_addr) + "," + 
                     std::to_string(ntohs(pair.second->addr.sin_port)); // Convert port
     }
 
     send(clientSocket, response.c_str(), response.length(), 0);
   }
+
+
   // Send a message to a group
   else if(command.compare("SENDMSG") == 0 && tokens.size() >= 4)
   {
@@ -359,6 +401,7 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
     storeMessage(toGroupID, fromGroupID, message);
   }
 
+  // Get messages for a group
   else if(command.compare("GETMSGS") == 0 && tokens.size() == 2)
   {
     std::string groupID = tokens[1];
@@ -372,6 +415,7 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
     }
   }
 
+  // Keep alive command
   else if(command.compare("KEEPALIVE") == 0 && tokens.size() == 2)
   {
     std::string toGroupID = tokens[1];
@@ -381,6 +425,7 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
     send(clientSocket, response.c_str(), response.length(), 0);
   }
 
+  // Unknown command
   else
   {
       std::cout << "Unknown command from client:" << buffer << std::endl;
@@ -446,6 +491,7 @@ int main(int argc, char* argv[])
         }
         else
         {
+            int serverIDcounter = 1;
             // First, accept  any new connections to the server on the listening socket
             if(FD_ISSET(listenSock, &readSockets))
             {
@@ -460,8 +506,10 @@ int main(int argc, char* argv[])
                maxfds = std::max(maxfds, clientSock) ;
 
                // create a new client to store information.
-
                clients[clientSock] = new Client(clientSock, client);
+
+               // Assign a unique ID to the client
+               clients[clientSock]->id = serverIDcounter;
 
                // Decrement the number of sockets waiting to be dealt with
                n--;
@@ -500,4 +548,7 @@ int main(int argc, char* argv[])
             }
         }
     }
+    // Close the log file and exit
+    closeLogFile();
+    return 0;
 }
