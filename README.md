@@ -103,6 +103,11 @@ The server listens for client connections and manages communication based on the
 
 The server logs all client interactions to a file (`server_log.txt`) in append mode. This log can be used for debugging and auditing communication.
 
+### Bonus points 
+
+The Bonus points I want to claim are the security issues of the botnet or e which is 2 points. The pdf file addressing these issues is called Security issues of the botnet and is included with the files that where submitted.
+
+
 ## Wireshark Trace for Client-Server Communication
 
 The following steps were used to capture the communication between the client and server:
@@ -120,3 +125,6 @@ The captured trace file is included with this submission, demonstrating the foll
 ### Viewing the Trace
 
 To view the trace, open `client_server_trace.pcap` in Wireshark. Filter by `tcp.port == 4021` to see communication specific to the server.
+
+
+
