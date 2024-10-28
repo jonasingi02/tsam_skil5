@@ -1,10 +1,3 @@
-//
-// Simple chat server for TSAM-409
-//
-// Command line: ./chat_server 4000 
-//
-// Author: Jacky Mallett (jacky@ru.is)
-//
 #include <stdio.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -29,6 +22,7 @@
 #include <iomanip>
 #include <ctime>
 #include <unistd.h>
+#include <fstream>
 
 // fix SOCK_NONBLOCK for OSX
 #ifndef SOCK_NONBLOCK
@@ -49,7 +43,7 @@ public:
     int sock;                        // socket of client connection
     std::string name;                // Client's user name
     struct sockaddr_in addr;         // Client's address information
-
+    int id; 
     Client(int socket, struct sockaddr_in address) : sock(socket), addr(address) {}
 
     ~Client() {}                     // Destructor for cleanup
@@ -139,6 +133,7 @@ int open_socket(int portno)
    }
 }
 
+
 // Close a client's connection, remove it from the client list, and
 // tidy up select sockets afterwards.
 void closeClient(int clientSocket, fd_set *openSockets, int *maxfds)
@@ -204,10 +199,38 @@ std::string getTimestamp() {
     ss << std::put_time(std::localtime(&now_time), "%Y-%m-%d %H:%M:%S");
     return ss.str();
 }
+
+// Get the log file stream for writing log messages
+std::ofstream& getLogFileStream() {
+    static std::ofstream logFile("server_log.txt", std::ios_base::app); // Appends to log file
+    return logFile;
+}
+
 // Log the command received from a client
 void logCommand(int clientSocket, const std::string& command) {
     std::string timestamp = getTimestamp();
-    std::cout << "[" << timestamp << "] Client " << clientSocket << ": " << command << std::endl;
+    
+    // Prepare the log message
+    std::string logMessage = "[" + timestamp + "] Client " + std::to_string(clientSocket) + ": " + command;
+
+    // Output to console
+    std::cout << logMessage << std::endl;
+    
+    // Output to log file
+    std::ofstream& logFile = getLogFileStream();
+    if (logFile.is_open()) {
+        logFile << logMessage << std::endl;
+    } else {
+        std::cerr << "Error: Unable to open log file for writing." << std::endl;
+    }
+}
+
+// Close the log file stream
+void closeLogFile() {
+    std::ofstream& logFile = getLogFileStream();
+    if (logFile.is_open()) {
+        logFile.close();
+    }
 }
 
 // Join a vector of strings into a single string
@@ -244,11 +267,17 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
       std::cerr << "Invalid command format: missing SOH or EOT." << std::endl;
       return; // Exit if the format is incorrect
   }  
+  
+  std::cout << "Received buffer from client: " << buffer << std::endl;
+  
+  
 
   // Create a string from the buffer and remove SOH and EOT
   std::string command(buffer + 1, strlen(buffer) - 2); // Exclude SOH and EOT
   std::vector<std::string> tokens;
   std::string token;  
+
+
 
   // Split command into tokens for parsing
   std::stringstream stream(command);
@@ -256,13 +285,15 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
       tokens.push_back(token); // Split by comma
   }
 
-  std::cout << "Debug: Received raw buffer content: " << buffer << std::endl;
+  std::cout << "Command: " << tokens[0] << std::endl;
+  std::cout << "Token size: " << tokens.size() << std::endl;
 
   // Log command
   logCommand(clientSocket, buffer);
 
+
   // Close the socket
-  if (command.compare("LEAVE") == 0)
+  if (tokens[0].compare("LEAVE") == 0)
   {
       // Close the socket, and leave the socket handling
       // code to deal with tidying up clients etc. when
@@ -270,8 +301,10 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
  
       closeClient(clientSocket, openSockets, maxfds);
   }
-  // First message sent by server
-  else if(command.compare("HELO") == 0 && tokens.size() == 2)
+ 
+
+  // First message sent by server after it connects
+  else if(tokens[0].compare("HELO") == 0 && tokens.size() == 2)
   {
     // Check if the client exists
     auto it = clients.find(clientSocket);
@@ -280,16 +313,25 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
         Client* client = it->second;
 
         std::string response = "SERVERS,";
-        response += "A5 " + std::to_string(client->sock) + "," + 
+        
+        // Add the server sending the command first
+        response += "A5_" + std::to_string(client->id) + "," +  // Include ID of this server with underscore
                     inet_ntoa(client->addr.sin_addr) + "," + 
                     std::to_string(ntohs(client->addr.sin_port)); // Port needs to be converted
 
         // Append additional 1-hop server connections
+        bool first = true; // To handle the first entry differently
         for (auto const& pair : clients)
         {
-            if (pair.second->sock != client->sock)
+            if (pair.second->sock != client->sock) // Don't include the calling client
             {
-                response += ";" + std::to_string(pair.second->sock) + "," + 
+                if (!first)
+                {
+                    response += ";"; 
+                }
+                first = false;
+
+                response += "A5_" + std::to_string(pair.second->id) + "," +  // Use underscore
                             inet_ntoa(pair.second->addr.sin_addr) + "," + 
                             std::to_string(ntohs(pair.second->addr.sin_port)); // Convert port
             }
@@ -301,8 +343,9 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
     }
   }
 
+
   // List all connected servers
-  else if(command.compare("LISTSERVERS") == 0)
+  else if(tokens[0].compare("LISTSERVERS") == 0)
   {
     std::string response = "SERVERS,";
     bool first = true; // To handle the first entry differently
@@ -316,50 +359,70 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
         }
         first = false;
 
-        response += "A5 " + std::to_string(pair.second->sock) + "," + 
+        response += "A5_" + std::to_string(pair.second->id) + "," + 
                     inet_ntoa(pair.second->addr.sin_addr) + "," + 
                     std::to_string(ntohs(pair.second->addr.sin_port)); // Convert port
     }
 
     send(clientSocket, response.c_str(), response.length(), 0);
   }
+
+
   // Send a message to a group
-  else if(command.compare("SENDMSG") == 0 && tokens.size() >= 4)
-  {
-    std::string toGroupID = tokens[1];
-    std::string fromGroupID = tokens[2];
-    
-    // Construct the message from the tokens starting from index 3
+  else if(tokens[0].compare("SENDMSG") == 0) 
+{
+    std::string toGroupID;
+    std::string fromGroupID;
     std::string message;
-    for(auto i = tokens.begin() + 3; i != tokens.end(); i++) 
-    {
-        message += *i + " ";
+
+    // Check if it's the 3-token format: "SENDMSG,<GROUP ID>,<message contents>"
+    if (tokens.size() == 3) {
+        toGroupID = tokens[1];
+        fromGroupID = "self";  // Use "self" or some identifier if `FROM GROUP ID` is implied
+
+        // The entire message content is in the third token
+        message = tokens[2];
+    } 
+    // Else, use the 4-token format: "SENDMSG,<TO GROUP ID>,<FROM GROUP ID>,<message content>"
+    else if (tokens.size() >= 4) {
+        toGroupID = tokens[1];
+        fromGroupID = tokens[2];
+
+        // Construct the message content starting from the 4th token
+        for(auto i = tokens.begin() + 3; i != tokens.end(); i++) {
+            message += *i + " ";
+        }
+
+        // Remove trailing space from message
+        if (!message.empty()) {
+            message.pop_back();
+        }
+    }
+    else {
+        // Invalid format, send an error response
+        std::string errorMsg = "Error: Invalid SENDMSG command format.";
+        send(clientSocket, errorMsg.c_str(), errorMsg.length(), 0);
+        return; 
     }
 
-    // Remove the trailing space if message is not empty
-    if (!message.empty()) {
-        message.pop_back();
-    }
-
-    // Construct the full SENDMSG command
+    // Construct the full SENDMSG command to check size
     std::string sendMsgCommand = "SENDMSG," + toGroupID + "," + fromGroupID + "," + message;
 
     // Check if the command exceeds the 5000-byte limit
-    if (sendMsgCommand.length() > 5000)
-    {
+    if (sendMsgCommand.length() > 5000) {
         std::cerr << "SENDMSG command exceeds the 5000-byte limit." << std::endl;
 
         // Send an error message back to the client
         std::string errorMsg = "Error: Message exceeds the 5000-byte limit.";
         send(clientSocket, errorMsg.c_str(), errorMsg.length(), 0);
-        return; // Exit to avoid sending the message 
+        return; 
     }
 
     // Store the message for the target group if within limits
     storeMessage(toGroupID, fromGroupID, message);
-  }
-
-  else if(command.compare("GETMSGS") == 0 && tokens.size() == 2)
+}
+  // Get messages for a group
+  else if(tokens[0].compare("GETMSGS") == 0 && tokens.size() == 2)
   {
     std::string groupID = tokens[1];
     std::vector<Message> messages = getMessages(groupID);
@@ -372,7 +435,27 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
     }
   }
 
-  else if(command.compare("KEEPALIVE") == 0 && tokens.size() == 2)
+  else if (tokens[0].compare("GETMSG") == 0 && tokens.size() == 2)
+  {
+    std::string groupID = tokens[1];
+    
+    // Retrieve a single message, for example, the latest or first in the list
+    std::vector<Message> messages = getMessages(groupID);
+    
+    if (!messages.empty()) {
+        const Message& msg = messages.front();  // Get the first message or define criteria for "latest"
+        std::string response = "From " + msg.fromGroupID + ": " + msg.content;
+        send(clientSocket, response.c_str(), response.length(), 0);
+    } else {
+        // Send a message if no messages are found for the group
+        std::string response = "No messages found for group " + groupID;
+        send(clientSocket, response.c_str(), response.length(), 0);
+    }
+  }
+
+
+  // Keep alive command
+  else if(tokens[0].compare("KEEPALIVE") == 0 && tokens.size() == 2)
   {
     std::string toGroupID = tokens[1];
     int pendingCount = getMessageCount(toGroupID);
@@ -381,6 +464,7 @@ void clientCommand(int clientSocket, fd_set *openSockets, int *maxfds,
     send(clientSocket, response.c_str(), response.length(), 0);
   }
 
+  // Unknown command
   else
   {
       std::cout << "Unknown command from client:" << buffer << std::endl;
@@ -446,6 +530,7 @@ int main(int argc, char* argv[])
         }
         else
         {
+            int serverIDcounter = 1;
             // First, accept  any new connections to the server on the listening socket
             if(FD_ISSET(listenSock, &readSockets))
             {
@@ -460,8 +545,10 @@ int main(int argc, char* argv[])
                maxfds = std::max(maxfds, clientSock) ;
 
                // create a new client to store information.
-
                clients[clientSock] = new Client(clientSock, client);
+
+               // Assign a unique ID to the client
+               clients[clientSock]->id = serverIDcounter;
 
                // Decrement the number of sockets waiting to be dealt with
                n--;
@@ -500,4 +587,7 @@ int main(int argc, char* argv[])
             }
         }
     }
+    // Close the log file and exit
+    closeLogFile();
+    return 0;
 }
