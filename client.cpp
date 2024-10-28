@@ -67,58 +67,6 @@ void printTimestamp() {
     std::cout << "[" << std::put_time(std::localtime(&now_time), "%Y-%m-%d %H:%M:%S") << "] ";
 }
 
-void get_message_from_server(int sock, const std::string& group_id) {
-    // Send the GETMSG command to the server
-    std::string command = "\x01GETMSG," + group_id + "\x04";
-    send(sock, command.c_str(), command.size(), 0);
-
-    // Log sent command
-    printTimestamp();
-    std::cout << "Sent: " << "GETMSG," << group_id << std::endl;
-
-    // Receive server's response
-    char buffer[5000];
-    int valread = read(sock, buffer, 5000);
-    if (valread > 0) {
-        buffer[valread] = '\0';
-        printTimestamp();
-        std::cout << "Received: " << buffer << std::endl;
-    }
-}
-
-void send_message_to_server(int sock, const std::string& group_id, const std::string& message_contents) {
-    std::string command = "\x01SENDMSG," + group_id + "," + message_contents + "\x04";
-    send(sock, command.c_str(), command.size(), 0);
-
-    printTimestamp();
-    std::cout << "Sent: " << "SENDMSG," << group_id << ", " << message_contents << std::endl;
-
-    // Acknowledge from the server
-    char buffer[5000];
-    int valread = read(sock, buffer, 5000);
-    if (valread > 0) {
-        buffer[valread] = '\0';
-        printTimestamp();
-        std::cout << "Received: " << buffer << std::endl;
-    }
-}
-
-// Function to list servers connected to the main server
-void list_servers(int sock) {
-    std::string command = "\x01LISTSERVERS\x04";
-    send(sock, command.c_str(), command.size(), 0);
-
-    printTimestamp();
-    std::cout << "Sent: LISTSERVERS" << std::endl;
-
-    char buffer[5000];
-    int valread = read(sock, buffer, 5000);
-    if (valread > 0) {
-        buffer[valread] = '\0';
-        printTimestamp();
-        std::cout << "Received: " << buffer << std::endl;
-    }
-}
 
 int main(int argc, char* argv[])
 {
